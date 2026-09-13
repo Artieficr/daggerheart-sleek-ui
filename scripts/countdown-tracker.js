@@ -373,7 +373,14 @@ export function registerCountdownTracker() {
 
       if (systemCountdownSetting && systemCountdownSetting.countdowns) {
         for (const [id, countdown] of Object.entries(systemCountdownSetting.countdowns)) {
-          const ownership = this.#getPlayerOwnership(game.user, systemCountdownSetting, countdown);
+          // The system's own per-countdown `hidden` field falls back to the
+          // tracker-wide `hideNewCountdowns` default when unset (mirrors the
+          // system's own DhCountdowns rendering, e.g. `daggerheart.js`'s
+          // `hidden: countdown.hidden ?? setting.hideNewCountdowns`) — a
+          // countdown left on "inherit" is hidden from players by default
+          // exactly when new countdowns are.
+          const hiddenFromPlayers = countdown.hidden ?? systemCountdownSetting.hideNewCountdowns;
+          const ownership = this.#getPlayerOwnership(game.user, countdown, hiddenFromPlayers);
           if (ownership !== CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE) {
             const current = countdown.progress.current;
             const max = countdown.progress.start;
@@ -383,13 +390,7 @@ export function registerCountdownTracker() {
             countdowns[id] = {
               ...countdown,
               editable: isGM || ownership === CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER,
-              // The system's own per-countdown `hidden` field falls back to
-              // the tracker-wide `hideNewCountdowns` default when unset
-              // (mirrors the system's own DhCountdowns rendering, e.g.
-              // `daggerheart.js`'s `hidden: countdown.hidden ?? setting.hideNewCountdowns`)
-              // — a countdown left on "inherit" is hidden from players by
-              // default exactly when new countdowns are.
-              hiddenFromPlayers: countdown.hidden ?? systemCountdownSetting.hideNewCountdowns,
+              hiddenFromPlayers,
               percentage,
               pctRemaining,
               cssClass: `shape-${iconShape}`,
@@ -423,10 +424,19 @@ export function registerCountdownTracker() {
       };
     }
 
-    #getPlayerOwnership(user, setting, countdown) {
+    // Mirrors the system's own `DhCountdown#getUserLevel` (confirmed against
+    // the bundled `daggerheart.js`) — the world `Countdowns` setting has no
+    // `defaultOwnership` field, so the previous fallback to `setting.
+    // defaultOwnership` always resolved to `undefined`, which is never
+    // `=== NONE`, which meant every countdown was visible to every player
+    // regardless of its `hidden` flag or explicit per-player ownership.
+    #getPlayerOwnership(user, countdown, hiddenFromPlayers) {
+      if (user.isGM) return CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER;
       const playerOwnership = countdown.ownership[user.id];
       return playerOwnership === undefined || playerOwnership === CONST.DOCUMENT_OWNERSHIP_LEVELS.INHERIT
-        ? setting.defaultOwnership
+        ? hiddenFromPlayers
+          ? CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE
+          : CONST.DOCUMENT_OWNERSHIP_LEVELS.OBSERVER
         : playerOwnership;
     }
 
